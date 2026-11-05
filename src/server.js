@@ -17,6 +17,7 @@ const PUBLIC = path.join(__dirname, '..', 'public');
 const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'],
   '/office.png': ['office.png', 'image/png'], '/sprites.png': ['sprites.png', 'image/png'],
 };
+const COMMAND = /^[a-z0-9][a-z0-9 ._-]{0,60}$/;
 const sha = (text) => crypto.createHash('sha256').update(text).digest();
 
 class HttpError extends Error {
@@ -49,7 +50,7 @@ function createApp(config) {
   const projects = new Map(config.projects.map((p) => {
     const office = new Office(config.dataDir, p);
     const runner = new Runner({
-      office, cli, maxConcurrent: config.maxConcurrent || 2,
+      office, cli, maxConcurrent: office.settings().maxConcurrent || config.maxConcurrent || 2,
       timeoutMs: (config.jobTimeoutMinutes || 20) * 60000, mcpServers: config.mcpServers,
     });
     return [p.id, { office, runner, project: p }];
@@ -92,7 +93,13 @@ function createApp(config) {
       ).map((t) => ({ id: t.id, title: t.title, taskId: t.taskId, tokens: t.session?.tokens || 0 })),
     }));
     return {
-      project: { id: project.id, name: project.name, base: project.base },
+      project: {
+        id: project.id, name: project.name, base: project.base, repo: project.repo,
+        worktrees: project.worktrees, template: project.template, brief: office.brief(),
+      },
+      server: { host: config.host, port: config.port, mcpServers: Object.keys(config.mcpServers || {}) },
+      maxConcurrent: runner.maxConcurrent,
+      usage: office.usage(),
       agents,
       tasks: office.tasks(),
       inbox: office.inbox(),
@@ -121,7 +128,9 @@ function createApp(config) {
       return buildPackage({ office, agent, thread, text: q.text || '' });
     },
 
-    'GET /api/journal': (q) => ({ entries: pick(q).office.journal(100) }),
+    'GET /api/journal': (q) => ({ entries: pick(q).office.journal(300) }),
+
+    'GET /api/run': (q) => ({ prompt: pick(q).office.runPrompt(q.job) }),
 
     'POST /api/message': (b) => {
       const { runner, office } = pick(b);
@@ -195,14 +204,45 @@ function createApp(config) {
       const { office } = pick(b);
       const agent = agentOf(office, b.id);
       if (!isValidChoice(cat, b.provider, b.model, b.effort)) throw new HttpError(400, 'Combinación de modelo no válida.');
-      office.saveAgent({ ...agent, provider: b.provider, model: b.model, effort: b.effort });
+      const changes = { provider: b.provider, model: b.model, effort: b.effort };
+      if (b.contextLimit !== undefined) {
+        if (!Number.isInteger(b.contextLimit) || b.contextLimit < 5000 || b.contextLimit > 1000000) throw new HttpError(400, 'Tope de contexto no válido.');
+        changes.contextLimit = b.contextLimit;
+      }
+      if (b.canWrite !== undefined) changes.canWrite = b.canWrite === true;
+      if (b.commands !== undefined) {
+        if (!Array.isArray(b.commands) || !b.commands.every((c) => typeof c === 'string' && COMMAND.test(c))) throw new HttpError(400, 'Comando no válido.');
+        changes.commands = b.commands;
+      }
+      if (b.mcp !== undefined) {
+        const known = Object.keys(config.mcpServers || {});
+        if (!Array.isArray(b.mcp) || !b.mcp.every((m) => known.includes(m))) throw new HttpError(400, 'MCP desconocido.');
+        changes.mcp = b.mcp;
+      }
+      office.saveAgent({ ...agent, ...changes });
       if (typeof b.charter === 'string') office.saveCharter(agent.id, b.charter);
       if (typeof b.memory === 'string') office.saveMemory(agent.id, b.memory);
       return { ok: true };
     },
 
     'POST /api/stop': (b) => {
-      pick(b).runner.stopAll();
+      const { runner } = pick(b);
+      if (b.job) return { stopped: runner.stop(b.job) };
+      runner.stopAll();
+      return { ok: true };
+    },
+
+    'POST /api/settings': (b) => {
+      const { office, runner } = pick(b);
+      if (!Number.isInteger(b.maxConcurrent) || b.maxConcurrent < 1 || b.maxConcurrent > 4) throw new HttpError(400, 'Valor no válido.');
+      office.saveSettings({ maxConcurrent: b.maxConcurrent });
+      runner.maxConcurrent = b.maxConcurrent;
+      runner.pump();
+      return { ok: true };
+    },
+
+    'POST /api/brief': (b) => {
+      pick(b).office.saveBrief(text(b.text, 'el brief', 100000));
       return { ok: true };
     },
   };
@@ -223,6 +263,10 @@ function createApp(config) {
 
     if (req.method === 'POST' && url.pathname === '/api/login') return handleLogin(body, res);
     if (!isOwner(req)) throw new HttpError(401, 'Inicia sesión.');
+    if (req.method === 'POST' && url.pathname === '/api/logout') {
+      res.setHeader('Set-Cookie', 'stackia=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+      return json(res, 200, { ok: true });
+    }
 
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) throw new HttpError(404, 'No encontrado.');

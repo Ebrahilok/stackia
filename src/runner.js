@@ -124,7 +124,7 @@ class Runner {
 
     for (const fact of handoff?.memory || []) office.propose(agent.id, fact, job.thread);
     office.log('run', {
-      agent: agent.id, thread: job.thread, task: task?.id, model: agent.model, sentTokens: pack.tokens,
+      job: job.id, agent: agent.id, provider: agent.provider, thread: job.thread, task: task?.id, model: agent.model, sentTokens: pack.tokens,
       resumed: pack.resumed, usage: parsed.usage, seconds, next_action: handoff?.next_action,
     });
     if (task) {
@@ -141,7 +141,7 @@ class Runner {
     const thread = office.thread(job.agent, job.thread);
     thread.messages.push({ role: 'system', text: `Error: ${message}`, at: now() });
     office.saveThread(thread);
-    office.log('run_failed', { agent: job.agent, thread: job.thread, error: message });
+    office.log('run_failed', { job: job.id, agent: job.agent, thread: job.thread, error: message });
     if (thread.taskId) office.updateTask(thread.taskId, { status: 'failed' });
   }
 
@@ -154,6 +154,20 @@ class Runner {
     thread.messages.push({ role: 'system', text: `Contexto limpiado (${reason}, ${tokens} tokens).`, at: now() });
     this.office.saveThread(thread);
     this.office.log('cleanup', { agent: agentId, thread: threadId, reason, tokens });
+    return true;
+  }
+
+  /** Stops one queued or running job. Returns false if it is already gone. */
+  stop(jobId) {
+    const queued = this.queue.findIndex((j) => j.id === jobId);
+    if (queued >= 0) {
+      this.recordFailure(this.queue.splice(queued, 1)[0], 'Stopped by the owner.');
+      return true;
+    }
+    const entry = this.running.get(jobId);
+    if (!entry) return false;
+    entry.stopped = true;
+    if (entry.child) killTree(entry.child);
     return true;
   }
 

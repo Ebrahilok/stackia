@@ -214,6 +214,29 @@ test('emergency stop ends a running job', async () => {
   assert.match(t.messages.at(-1).text, /Stopped/);
 });
 
+test('one job can be stopped alone, and settings and agent fields apply', async () => {
+  const id = await freeThread();
+  const { data } = await call('POST', '/api/message', { project: 'demo', agent: 'arq', thread: id, text: 'SLEEP' });
+  await until(async () => (await stateNow()).runner.running.length === 1);
+  assert.equal((await call('POST', '/api/stop', { project: 'demo', job: data.job })).data.stopped, true);
+  await until(async () => !(await thread('arq', id)).busy);
+
+  assert.equal((await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 3 })).status, 200);
+  assert.equal((await stateNow()).maxConcurrent, 3);
+  assert.equal((await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 99 })).status, 400);
+
+  const base2 = { project: 'demo', id: 'qa', provider: 'mock', model: 'mock', effort: 'low' };
+  assert.equal((await call('POST', '/api/agent', { ...base2, contextLimit: 20000, canWrite: true, commands: ['rojo build'] })).status, 200);
+  const qa = (await stateNow()).agents.find((a) => a.id === 'qa');
+  assert.deepEqual([qa.contextLimit, qa.canWrite, qa.commands], [20000, true, ['rojo build']]);
+  assert.equal((await call('POST', '/api/agent', { ...base2, commands: ['rm -rf /; x'] })).status, 400);
+  assert.equal((await call('POST', '/api/agent', { ...base2, mcp: ['unknown'] })).status, 400);
+
+  assert.equal((await call('POST', '/api/brief', { project: 'demo', text: 'NEW BRIEF' })).status, 200);
+  assert.equal((await stateNow()).project.brief, 'NEW BRIEF');
+  assert.ok((await stateNow()).usage.mock.runs > 0);
+});
+
 test('rejects bad ids and bad model choices', async () => {
   assert.notEqual((await call('GET', '/api/thread?project=demo&agent=arq&thread=../../secret')).status, 200);
   const bad = await call('POST', '/api/agent', { project: 'demo', id: 'arq', provider: 'claude', model: 'nope', effort: 'low' });

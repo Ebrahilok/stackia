@@ -1,4 +1,5 @@
 node_modules/
 stackia.config.json
+client/client.json
 data/
 *.log

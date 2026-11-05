@@ -117,7 +117,29 @@ class Office {
     this.log('memory_decision', { agent: item.agent, text: item.text, accepted: accept });
   }
 
+  settings() { return this.store.readJson('settings.json', {}); }
+  saveSettings(changes) { this.store.writeJson('settings.json', { ...this.settings(), ...changes }); }
+
+  /** Tokens per provider, from the journal. */
+  usage() {
+    const today = now().slice(0, 10);
+    const totals = {};
+    for (const line of this.store.readText('journal.jsonl').split('\n')) {
+      if (!line.includes('"type":"run"')) continue;
+      const entry = JSON.parse(line);
+      const provider = entry.provider || this.agent(entry.agent)?.provider || 'unknown';
+      const tokens = (entry.usage?.input || 0) + (entry.usage?.output || 0);
+      totals[provider] ??= { today: 0, total: 0, runs: 0 };
+      totals[provider].total += tokens;
+      totals[provider].runs += 1;
+      if (entry.at.startsWith(today)) totals[provider].today += tokens;
+    }
+    return totals;
+  }
+
   log(type, data = {}) { this.store.append('journal.jsonl', JSON.stringify({ at: now(), type, ...data })); }
+  runPrompt(job) { return this.store.readText(`runs/${assertId(job)}.prompt.txt`); }
+
   journal(limit = 50) {
     const lines = this.store.readText('journal.jsonl').trim().split('\n').filter(Boolean);
     return lines.slice(-limit).map((l) => JSON.parse(l));

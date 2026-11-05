@@ -15,6 +15,14 @@ A self-hosted office for AI development agents. One machine hosts the agents; yo
 
 Set `host` to a private address only. Do not expose the port to the Internet.
 
+## Desktop app
+
+The app in `client/` is a window onto the host, so nothing else needs installing on a client machine.
+
+1. In `client/`, run `npm install`.
+2. Copy `client.example.json` to `client.json` and set the host URL.
+3. Run `npm start`.
+
 ## Docs
 
 - `docs/DESIGN.md`: full design, including parts not built yet (in Spanish).
