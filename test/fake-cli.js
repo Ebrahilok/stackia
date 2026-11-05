@@ -7,6 +7,12 @@ const message = prompt.split("## OWNER'S MESSAGE")[1] || prompt;
 const session = process.argv[2] || 'fake-session';
 const has = (word) => message.includes(word);
 
+if (has('LIMITONCE') && process.env.STACKIA_TEST_FLAG && !fs.existsSync(process.env.STACKIA_TEST_FLAG)) {
+  fs.writeFileSync(process.env.STACKIA_TEST_FLAG, 'x');
+  console.log(JSON.stringify({ text: '', error: 'usage limit reached, try again later' }));
+  process.exit(0);
+}
+if (has('ESCAPE')) fs.writeFileSync('../escaped.txt', 'x');
 if (has('CRASH')) {
   console.error('boom');
   process.exit(3);

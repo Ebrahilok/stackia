@@ -9,6 +9,7 @@ const { resolveCli } = require('./adapters');
 const { catalog, isValidChoice } = require('./catalog');
 const { buildPackage } = require('./context');
 const gitOps = require('./git');
+const { Autopilot } = require('./autopilot');
 
 const MAX_BODY = 256 * 1024;
 const MAX_LOGIN_FAILURES = 5;
@@ -53,9 +54,26 @@ function createApp(config) {
     const runner = new Runner({
       office, cli, maxConcurrent: office.settings().maxConcurrent || config.maxConcurrent || 2,
       timeoutMs: (config.jobTimeoutMinutes || 20) * 60000, mcpServers: config.mcpServers,
+      limitBackoffMs: config.limitBackoffMs,
     });
-    return [p.id, { office, runner, project: p }];
+    const entry = { office, runner, project: p };
+    entry.autopilot = new Autopilot({
+      office, runner, project: p, tickMs: config.autopilotTickMs, approve: (id) => approveTask(entry, id),
+    });
+    return [p.id, entry];
   }));
+  if (config.autopilotResume !== false) for (const entry of projects.values()) entry.autopilot.resume();
+
+  async function approveTask({ office, runner, project }, id) {
+    const task = office.task(id);
+    if (!task || task.status !== 'proposed') throw new HttpError(409, 'La tarea no está pendiente de aprobar.');
+    const { worktree, branch } = await gitOps.createWorktree(project, task.id);
+    office.updateTask(task.id, { status: 'approved', worktree, branch });
+    office.log('task_approved', { task: task.id });
+    const thread = office.createThread(task.agent, `#${task.id} · ${task.title}`, task.id);
+    runner.send(task.agent, thread.id, task.instruction);
+    return office.task(task.id);
+  }
   const allowedHosts = new Set(['localhost', '127.0.0.1', config.host, ...(config.allowedHosts || [])]);
   const login = { failures: 0, lockedUntil: 0 };
 
@@ -83,7 +101,7 @@ function createApp(config) {
     return office.threads(agentId).find((t) => !t.taskId) || office.createThread(agentId, 'Charla libre');
   }
 
-  function state({ office, runner, project }) {
+  function state({ office, runner, project, autopilot }) {
     const agents = office.agents().map((a) => ({
       ...a,
       charter: office.charter(a.id),
@@ -100,6 +118,7 @@ function createApp(config) {
       },
       server: { host: config.host, port: config.port, mcpServers: Object.keys(config.mcpServers || {}) },
       maxConcurrent: runner.maxConcurrent,
+      night: autopilot.summary(),
       usage: office.usage(),
       agents,
       tasks: office.tasks(),
@@ -171,17 +190,7 @@ function createApp(config) {
       });
     },
 
-    'POST /api/task/approve': async (b) => {
-      const { office, runner, project } = pick(b);
-      const task = office.task(b.id);
-      if (!task || task.status !== 'proposed') throw new HttpError(409, 'La tarea no está pendiente de aprobar.');
-      const { worktree, branch } = await gitOps.createWorktree(project, task.id);
-      office.updateTask(task.id, { status: 'approved', worktree, branch });
-      office.log('task_approved', { task: task.id });
-      const thread = office.createThread(task.agent, `#${task.id} · ${task.title}`, task.id);
-      runner.send(task.agent, thread.id, task.instruction);
-      return office.task(task.id);
-    },
+    'POST /api/task/approve': (b) => approveTask(pick(b), b.id),
 
     'POST /api/task/reject': (b) => {
       const { office } = pick(b);
@@ -227,9 +236,26 @@ function createApp(config) {
     },
 
     'POST /api/stop': (b) => {
-      const { runner } = pick(b);
+      const { runner, autopilot } = pick(b);
       if (b.job) return { stopped: runner.stop(b.job) };
+      autopilot.stop('parada de emergencia');
       runner.stopAll();
+      return { ok: true };
+    },
+
+    'GET /api/night': (q) => ({ night: pick(q).autopilot.summary(), report: pick(q).autopilot.report() }),
+
+    'POST /api/night/start': (b) => {
+      try {
+        pick(b).autopilot.start({ batch: b.batch, until: b.until, push: b.push });
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+      return { ok: true };
+    },
+
+    'POST /api/night/drain': (b) => {
+      pick(b).autopilot.drain();
       return { ok: true };
     },
 

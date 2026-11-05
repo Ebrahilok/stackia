@@ -173,4 +173,6 @@ tr.click:hover{background:#f3e6c8}
 .m b{color:#fad696}
 .swbtn{border:0;padding:0;cursor:pointer}
 input[type=number]{font:inherit;font-size:14px;border:2px solid #d4b988;background:#fff8e8;border-radius:8px;padding:6px 9px;color:var(--ink);width:120px}
+.warnbox{background:#fde7c8;border:2px solid #e0a860;border-radius:10px;padding:10px 13px;font-size:14.5px;margin:10px 0}
+.okbox{background:#dff3e4;border:2px solid #8ccaa0;border-radius:10px;padding:10px 13px;font-size:14.5px;margin:10px 0}
 .c-charter{background:#e0785a}.c-project{background:#6f9bdc}.c-memory{background:#6bbf86}.c-notes{background:#c9a14a}.c-task{background:#efbe55}.c-previous{background:#9a8bd8}.c-cited{background:#c0508c}.c-message{background:#46b4a0}.c-format{background:#b5a48c}

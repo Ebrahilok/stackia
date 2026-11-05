@@ -15,7 +15,8 @@
       "remote": "origin",
       "worktrees": "../stackia-work/demo",
       "template": "roblox-rojo",
-      "brief": null
+      "brief": null,
+      "checks": []
     }
   ]
 }

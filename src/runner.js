@@ -7,21 +7,36 @@ const { run, killTree } = require('./process');
 const gitOps = require('./git');
 const { now } = require('./office');
 
+const fs = require('node:fs');
+
 const AUTO_CLEAN_RATIO = 0.6;
+const DEFAULT_LIMIT_BACKOFF_MS = 30 * 60000;
+const LIMIT_ERROR = /rate.?limit|usage limit|limit reached|quota|too many requests|resource.?exhausted|\b429\b|overloaded|try again (in|later)/i;
+const TASK_DIR = /^T-\d+$/;
 const normalize = (file) => file.replace(/\\/g, '/').replace(/^\.\//, '');
 
 /** Queues agent runs, keeps context alive across sessions, and records everything. */
 class Runner {
-  constructor({ office, cli, maxConcurrent, timeoutMs, mcpServers = {} }) {
-    Object.assign(this, { office, cli, maxConcurrent, timeoutMs, mcpServers });
+  constructor({ office, cli, maxConcurrent, timeoutMs, mcpServers = {}, limitBackoffMs = DEFAULT_LIMIT_BACKOFF_MS }) {
+    Object.assign(this, { office, cli, maxConcurrent, timeoutMs, mcpServers, limitBackoffMs });
     this.queue = [];
     this.running = new Map();
     this.paused = false;
+    this.limits = new Map();
+    this.violations = [];
+    this.wake = null;
+  }
+
+  /** Until when a provider is paused because it reported a usage limit (0 if it is not). */
+  limitedUntil(provider) {
+    const until = this.limits.get(provider) || 0;
+    return until > Date.now() ? until : 0;
   }
 
   status() {
     return {
       paused: this.paused,
+      limits: [...this.limits].filter(([, until]) => until > Date.now()).map(([provider, until]) => ({ provider, until })),
       running: [...this.running.values()].map(({ job }) => summary(job)),
       queued: this.queue.map(summary),
     };
@@ -47,9 +62,16 @@ class Runner {
   }
 
   pump() {
-    while (!this.paused && this.running.size < this.maxConcurrent && this.queue.length) {
-      const job = this.queue.shift();
-      const entry = { job, child: null, stopped: false };
+    let index = 0;
+    while (!this.paused && this.running.size < this.maxConcurrent && index < this.queue.length) {
+      const job = this.queue[index];
+      const provider = this.office.agent(job.agent)?.provider;
+      if (this.limitedUntil(provider)) {
+        index += 1;
+        continue;
+      }
+      this.queue.splice(index, 1);
+      const entry = { job, child: null, stopped: false, violations: [] };
       this.running.set(job.id, entry);
       this.execute(entry)
         .catch((err) => this.recordFailure(job, err.message))
@@ -58,6 +80,57 @@ class Runner {
           this.pump();
         });
     }
+    this.scheduleWake();
+  }
+
+  /** Jobs held back by a provider limit start again by themselves once the pause ends. */
+  scheduleWake() {
+    clearTimeout(this.wake);
+    const until = this.queue
+      .map((job) => this.limitedUntil(this.office.agent(job.agent)?.provider))
+      .filter(Boolean);
+    if (!until.length) return;
+    this.wake = setTimeout(() => this.pump(), Math.max(50, Math.min(...until) - Date.now() + 50));
+    this.wake.unref();
+  }
+
+  /** Puts the job back at the front of the queue and pauses its provider. The task is not marked as failed. */
+  hitLimit(job, agent, message) {
+    const until = Date.now() + this.limitBackoffMs;
+    this.limits.set(agent.provider, until);
+    this.office.log('provider_limited', { provider: agent.provider, agent: agent.id, job: job.id, until: new Date(until).toISOString(), error: message.slice(0, 300) });
+    const thread = this.office.thread(job.agent, job.thread);
+    const time = new Date(until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    thread.messages.push({ role: 'system', text: `Límite de uso de ${agent.provider}. Reintento automático a las ${time}.`, at: now() });
+    this.office.saveThread(thread);
+    if (thread.taskId) this.office.updateTask(thread.taskId, { status: 'approved' });
+    this.queue.unshift(job);
+  }
+
+  /** Looks for writes outside the task's own branch folder, which agents must never make. */
+  async snapshot() {
+    const root = this.office.project.worktrees;
+    let entries = [];
+    try { entries = fs.readdirSync(root); } catch { /* the folder does not exist yet */ }
+    const status = await run('git', ['status', '--porcelain'], { cwd: this.office.project.repo, timeoutMs: 60000 });
+    return { entries: new Set(entries), status: new Set(status.stdout.split('\n').filter(Boolean)) };
+  }
+
+  async findViolations(before, job) {
+    const after = await this.snapshot();
+    const found = [];
+    for (const name of after.entries) {
+      if (!before.entries.has(name) && !TASK_DIR.test(name)) found.push({ kind: 'carpeta fuera de su rama', detail: name });
+    }
+    for (const line of after.status) {
+      if (!before.status.has(line)) found.push({ kind: 'tu copia de trabajo cambió', detail: line.trim() });
+    }
+    for (const item of found) {
+      const record = { at: now(), job: job.id, agent: job.agent, ...item };
+      this.violations.push(record);
+      this.office.log('violation', record);
+    }
+    return found;
   }
 
   async execute(entry) {
@@ -85,6 +158,7 @@ class Runner {
     };
     office.store.writeText(`runs/${job.id}.prompt.txt`, pack.prompt);
     const { cmd, args, stdin } = adapter.command(request, this.cli);
+    const before = await this.snapshot();
     const started = Date.now();
     const result = await run(cmd, args, {
       cwd: request.cwd,
@@ -92,17 +166,20 @@ class Runner {
       timeoutMs: this.timeoutMs,
       onStart: (child) => { entry.child = child; },
     });
+    entry.violations = await this.findViolations(before, job);
     if (entry.stopped) return this.recordFailure(job, 'Stopped by the owner.');
     if (result.timedOut) return this.recordFailure(job, 'Timed out.');
     if (result.spawnError) return this.recordFailure(job, `Could not start ${agent.provider}: ${result.spawnError}`);
 
     const parsed = adapter.parse(result);
-    if (parsed.error) return this.recordFailure(job, parsed.error);
+    if (parsed.error) {
+      return LIMIT_ERROR.test(parsed.error) ? this.hitLimit(job, agent, parsed.error) : this.recordFailure(job, parsed.error);
+    }
     if (pack.usedNotes) office.archiveNotes(agent.id);
-    await this.recordSuccess({ job, agent, task, parsed, pack, seconds: (Date.now() - started) / 1000 });
+    await this.recordSuccess({ job, agent, task, parsed, pack, violations: entry.violations, seconds: (Date.now() - started) / 1000 });
   }
 
-  async recordSuccess({ job, agent, task, parsed, pack, seconds }) {
+  async recordSuccess({ job, agent, task, parsed, pack, violations = [], seconds }) {
     const { office } = this;
     const thread = office.thread(job.agent, job.thread);
     const { text, handoff } = parseHandoff(parsed.text);
@@ -116,6 +193,7 @@ class Runner {
       warnings: [
         ...(handoff ? [] : ['Sin handoff: la próxima sesión retoma desde tu instrucción.']),
         ...(unconfirmed.length ? [`Dijo haber cambiado archivos que git no ve: ${unconfirmed.join(', ')}`] : []),
+        ...violations.map((v) => `Escribió fuera de su rama (${v.kind}): ${v.detail}`),
       ],
     });
     thread.session = { provider: agent.provider, id: parsed.sessionId, tokens: parsed.contextTokens || 0 };
@@ -139,6 +217,7 @@ class Runner {
   recordFailure(job, message) {
     const { office } = this;
     const thread = office.thread(job.agent, job.thread);
+    if (!thread) return;
     thread.messages.push({ role: 'system', text: `Error: ${message}`, at: now() });
     office.saveThread(thread);
     office.log('run_failed', { job: job.id, agent: job.agent, thread: job.thread, error: message });

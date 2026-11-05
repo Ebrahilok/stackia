@@ -6,7 +6,7 @@
   {"id":"qa","name":"QA","tag":"QA","provider":"claude","model":"sonnet","effort":"medium","canWrite":false,"contextLimit":60000,"commands":[],"mcp":[],
    "charter":"Eres QA. Verificas con evidencia y distingues lo probado en vivo de lo revisado offline. No cambias código: informas con archivo, línea y pasos para reproducir. Si algo requiere dos jugadores, un teléfono real o una cuenta de pago, márcalo como \"necesita al dueño\". Responde al dueño en español."},
   {"id":"bib","name":"Bibliotecario","tag":"BIB","provider":"agy","model":"gemini-3.8-flash","effort":"low","canWrite":false,"contextLimit":40000,"commands":[],"mcp":[],
-   "charter":"Eres el bibliotecario. Localizas archivos y resumes el estado del proyecto. Nunca inventes: si no está en los archivos, no lo afirmes. Usa el menor número de pasos posible. Responde al dueño en español."},
+   "charter":"Eres el bibliotecario. Localizas archivos y resumes el estado del proyecto. Nunca inventes: si no está en los archivos, no lo afirmes. Usa el menor número de pasos posible. No ejecutes comandos de shell: usa solo tus herramientas de lectura de archivos. Responde al dueño en español."},
   {"id":"mun","name":"Mundo","tag":"MUN","provider":"claude","model":"sonnet","effort":"medium","canWrite":true,"contextLimit":60000,"commands":[],"mcp":[],
    "charter":"Eres el agente de Mundo. Construyes mapas, arenas y piezas en Blender y exportas FBX. El código solo añade colisión, puertas y estaciones. Importa el FBX en Studio con computer use si tienes esa herramienta; si no, déjalo indicado para el dueño. Responde al dueño en español."},
   {"id":"ui","name":"Diseñador de UI","tag":"UI","provider":"claude","model":"sonnet","effort":"medium","canWrite":false,"contextLimit":60000,"commands":[],"mcp":[],

@@ -28,6 +28,18 @@ The app in `client/` is a window onto the host, so nothing else needs installing
 - `docs/DESIGN.md`: full design, including parts not built yet (in Spanish).
 - `mockups/`: office mockups and the scripts that generate them.
 
+## Overnight mode
+
+In the control panel, open **Noche**, tick the tasks you approve, set an end time and start. The agents then work alone:
+
+- Only the ticked tasks run, each in its own git worktree.
+- Each result is checked (`git diff --check` plus the project's `checks`) before its own `stackia/T-n` branch is pushed. `main` is never touched.
+- A provider that reports a usage limit is paused and retried by itself.
+- It stops at the end time, after three failures in a row, if an agent writes outside its branch, or on the emergency stop.
+- The machine is kept awake while it runs, and a report is written to `<dataDir>/projects/<id>/reports/`.
+
+Project `checks` are commands run in the task's worktree; `{tmp}` becomes a temporary file path.
+
 ## Tests
 
 `npm test` runs everything against a fake CLI, so it spends no quota.

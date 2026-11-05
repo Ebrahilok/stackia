@@ -5,7 +5,9 @@ const path = require('node:path');
 const MAX_ARG_PROMPT = 28000; // Windows caps a command line at about 32k characters.
 const READ_TOOLS = ['Read', 'Grep', 'Glob'];
 const WRITE_TOOLS = [...READ_TOOLS, 'Edit', 'Write'];
-const AGY_READ_COMMANDS = ['grep', 'ls', 'cat', 'find'];
+// On Windows agy runs commands through the shell itself, so the only safe read-only mode is
+// "no commands at all": its own file tools need no permission.
+const AGY_READ_COMMANDS = process.platform === 'win32' ? [] : ['grep', 'ls', 'cat', 'find'];
 
 const fail = (error) => ({ text: '', error });
 

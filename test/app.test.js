@@ -59,10 +59,12 @@ before(async () => {
   git(repo, 'remote', 'add', 'origin', bare);
   git(repo, 'push', 'origin', 'main');
 
+  process.env.STACKIA_TEST_FLAG = path.join(root, 'limit.flag');
   const brief = path.join(root, 'brief.md');
   fs.writeFileSync(brief, 'PROJECT BRIEF TEXT');
   app = createApp({
     host: '127.0.0.1', port: 0, dataDir: path.join(root, 'data'), maxConcurrent: 2, jobTimeoutMinutes: 1, enableMock: true,
+    autopilotTickMs: 40, limitBackoffMs: 400,
     projects: [{ id: 'demo', name: 'Demo', repo, base: 'main', remote: 'origin', worktrees: path.join(root, 'work'), template: 'roblox-rojo', brief }],
   });
   ({ server, token } = app);
@@ -262,4 +264,87 @@ test('adapters read real output shapes', () => {
   assert.match(write.args[write.args.indexOf('--allowedTools') + 1], /Bash\(rojo build:\*\)/);
   const denied = adapters.agy.parse({ stdout: JSON.stringify({ status: 'SUCCESS', response: '', denied_actions: ['grep'] }) });
   assert.match(denied.error, /Denied/);
+});
+
+/* ---------- overnight autopilot ---------- */
+const soon = () => new Date(Date.now() + 3600000).toISOString();
+const makeTask = async (instruction) => (await call('POST', '/api/task', { project: 'demo', agent: 'arq', title: instruction.slice(0, 30), instruction })).data.id;
+const night = (batch, extra = {}) => call('POST', '/api/night/start', { project: 'demo', batch, until: soon(), push: true, ...extra });
+const finishedNight = async () => until(async () => {
+  const { data } = await call('GET', '/api/night?project=demo');
+  return !data.night.active && data;
+}, 25000);
+const taskOf = async (id) => (await stateNow()).tasks.find((t) => t.id === id);
+
+test('night: runs the approved batch, checks it and pushes only task branches', async () => {
+  const ids = [await makeTask('WRITEFILE one'), await makeTask('WRITEFILE two')];
+  assert.equal((await night(ids)).status, 200);
+  const done = await finishedNight();
+  assert.equal(done.night.stopReason, 'lote completado');
+  for (const id of ids) assert.equal((await taskOf(id)).status, 'pushed');
+  const refs = git(bare, 'for-each-ref', '--format=%(refname)');
+  for (const id of ids) assert.match(refs, new RegExp(`refs/heads/stackia/${id}\\b`));
+  assert.equal(git(bare, 'log', '--format=%s', 'main').trim(), 'init', 'main must not move');
+  assert.ok(done.report.tasks.every((t) => t.tokens > 0 && t.commit));
+  assert.ok(app.projects.get('demo').office.store.list('reports').length >= 1);
+});
+
+test('night: a provider limit pauses the work and it resumes by itself', async () => {
+  const id = await makeTask('WRITEFILE LIMITONCE');
+  assert.equal((await night([id])).status, 200);
+  const done = await finishedNight();
+  assert.equal((await taskOf(id)).status, 'pushed');
+  assert.equal(done.report.limits.length, 1);
+  assert.equal(done.report.limits[0].provider, 'mock');
+});
+
+test('night: three failures in a row stop everything', async () => {
+  await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 1 });
+  try {
+    const ids = [await makeTask('CRASH a'), await makeTask('CRASH b'), await makeTask('CRASH c'), await makeTask('WRITEFILE late')];
+    assert.equal((await night(ids)).status, 200);
+    const done = await finishedNight();
+    assert.match(done.night.stopReason, /3 fallos/);
+    assert.equal((await taskOf(ids[3])).status, 'proposed', 'later tasks must not start');
+  } finally {
+    await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 3 });
+  }
+});
+
+test('night: a failing check is reported and nothing is pushed', async () => {
+  const project = app.projects.get('demo').project;
+  project.checks = ['node -e process.exit(1)'];
+  try {
+    const id = await makeTask('WRITEFILE broken');
+    await night([id]);
+    await finishedNight();
+    const task = await taskOf(id);
+    assert.equal(task.status, 'check_failed');
+    assert.ok(!git(bare, 'for-each-ref', '--format=%(refname)').includes(`stackia/${id}`));
+  } finally {
+    project.checks = [];
+  }
+});
+
+test('night: writing outside the task folder stops the night and is reported', async () => {
+  const id = await makeTask('WRITEFILE ESCAPE');
+  await night([id]);
+  const done = await finishedNight();
+  assert.match(done.night.stopReason, /fuera de su rama/);
+  assert.ok(done.report.violations.length >= 1);
+  assert.notEqual((await taskOf(id)).status, 'pushed', 'a task with a violation must not be pushed');
+  fs.rmSync(path.join(root, 'work', 'escaped.txt'), { force: true });
+});
+
+test('night: emergency stop ends it, and bad requests are refused', async () => {
+  const id = await makeTask('SLEEP');
+  assert.equal((await night([id], { until: new Date(Date.now() - 1000).toISOString() })).status, 400);
+  assert.equal((await night(['T-9999'])).status, 400);
+  assert.equal((await night([id])).status, 200);
+  assert.equal((await night([id])).status, 400, 'a second night cannot start');
+  await until(async () => (await stateNow()).runner.running.length === 1);
+  await call('POST', '/api/stop', { project: 'demo' });
+  const done = await finishedNight();
+  assert.equal(done.night.stopReason, 'parada de emergencia');
+  await until(async () => (await stateNow()).runner.running.length === 0);
 });

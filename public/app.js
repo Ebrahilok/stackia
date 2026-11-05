@@ -4,12 +4,16 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const STATUS_COLUMNS = [
   ['PROPUESTAS (tú apruebas)', ['proposed']],
   ['EN CURSO', ['approved', 'running']],
-  ['REVISIÓN', ['review', 'failed']],
+  ['REVISIÓN', ['review', 'failed', 'check_failed', 'empty']],
   ['SUBIDAS', ['pushed']],
 ];
 const LAYERS = {
   charter: 'prompt', project: 'proyecto', memory: 'memoria', notes: 'notas', task: 'tarea',
   previous: 'sesión anterior', cited: 'citadas', message: 'mensaje', format: 'formato',
+};
+const TASK_STATUS = {
+  proposed: 'pendiente', approved: 'en espera', running: 'en curso', review: 'lista', pushed: 'subida', failed: 'falló',
+  check_failed: 'no pasó las comprobaciones', empty: 'sin cambios', rejected: 'rechazada',
 };
 const POLL_MS = 2000;
 const AUTO_CLEAN_RATIO = 0.6;
@@ -143,6 +147,7 @@ async function refresh() {
   drawMemory();
   drawUsage();
   drawProject();
+  if (ui.view === 'noche') await drawNight();
   await drawThread();
 }
 
@@ -154,7 +159,9 @@ function drawTop() {
     m.append(el('b', '', fmt(usage[id]?.today || 0)));
     return m;
   }));
-  $('netlabel').textContent = runner.running.length ? `${runner.running.length} trabajando` : `${server.host}`;
+  const { night } = ui.state;
+  const label = runner.running.length ? `${runner.running.length} trabajando` : `${server.host}`;
+  $('netlabel').textContent = night.active ? `🌙 hasta las ${hhmm(night.until)} · ${label}` : label;
 }
 
 /* ---------- map: pan and zoom ---------- */
@@ -360,7 +367,9 @@ function taskCard(t) {
   const card = el('div', 'card');
   const index = ui.state.agents.findIndex((a) => a.id === t.agent);
   card.append(el('b', '', `#${t.id} `), t.title, el('br'), el('span', `tag t${index % 6}`, agentTag(t.agent)));
-  if (t.status === 'failed') card.append(' ', el('span', 'stat', 'falló'));
+  if (TASK_STATUS[t.status] && ['failed', 'check_failed', 'empty'].includes(t.status)) card.append(' ', el('span', 'stat', TASK_STATUS[t.status]));
+  if (t.error) card.append(el('div', 'stat', t.error));
+  if (t.pushError) card.append(el('div', 'stat', `No se pudo subir: ${t.pushError}`));
   if (t.handoff?.next_action) card.append(el('div', 'stat', `Siguiente: ${t.handoff.next_action}`));
   if (t.diff) card.append(el('pre', 'diff', t.diff));
   if (t.commit) card.append(el('div', 'stat', `${t.branch} · ${t.commit}`));
@@ -402,6 +411,7 @@ function showTab(view) {
   $$('.tab').forEach((t) => t.classList.toggle('on', t.dataset.v === view));
   $$('.view').forEach((x) => x.classList.toggle('on', x.id === `v-${view}`));
   if (view === 'contexto') guarded(drawPreview)();
+  if (view === 'noche') guarded(drawNight)();
 }
 $$('.tab').forEach((t) => { t.onclick = () => showTab(t.dataset.v); });
 
@@ -681,6 +691,91 @@ function drawProject() {
 $('brief-save').onclick = guarded(async () => {
   await post('/api/brief', { text: $('brief').value });
   toast('Brief guardado. Se aplica en las sesiones nuevas.');
+});
+
+/* night */
+ui.pick = new Set();
+function nextTime(value) {
+  const [h, m] = value.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() < Date.now() + 60000) d.setDate(d.getDate() + 1);
+  return d;
+}
+async function drawNight() {
+  const { night, report } = await api(`/api/night?${query({})}`);
+  const { tasks, agents } = ui.state;
+  const status = $('n-status');
+  status.className = night.active ? 'warnbox' : 'okbox';
+  status.textContent = night.active
+    ? `🌙 Noche en marcha hasta las ${hhmm(night.until)}. ${night.push ? 'Cada rama se sube a GitHub al pasar las comprobaciones.' : 'Las ramas se quedan en el portátil.'}`
+    : night.stopReason ? `Última noche terminó: ${night.stopReason}.` : 'No hay ninguna noche en marcha.';
+  $('n-start').disabled = night.active;
+  $('n-drain').disabled = !night.active;
+
+  const pending = tasks.filter((t) => t.status === 'proposed');
+  [...ui.pick].forEach((id) => { if (!pending.some((t) => t.id === id)) ui.pick.delete(id); });
+  $('n-list').replaceChildren(...(pending.length ? pending.map((t) => {
+    const line = el('label', 'file');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = ui.pick.has(t.id);
+    box.onchange = () => { (box.checked ? ui.pick.add(t.id) : ui.pick.delete(t.id)); };
+    line.append(box, ` #${t.id} ${t.title} `, el('span', 't', agentTag(t.agent)));
+    return line;
+  }) : [el('div', 'note', 'No hay tareas pendientes. Añade alguna abajo o desde el chat con «Convertir en tarea».')]));
+  if ($('n-agent').options.length === 0) $('n-agent').replaceChildren(...agents.map((a) => new Option(`${a.tag} · ${a.name}`, a.id)));
+
+  const body = [];
+  if (report) {
+    body.push(el('div', 'note', `Empezó ${hhmm(report.startedAt)}${report.finishedAt ? `, terminó ${hhmm(report.finishedAt)}` : ', en curso'}.`));
+    body.push(table(['Tarea', 'Agente', 'Estado', 'Tokens', 'Rama / problema'], report.tasks.map((t) => [
+      `#${t.id} ${t.title}`, agentTag(t.agent), TASK_STATUS[t.status] || t.status, fmt(t.tokens),
+      t.error || (t.pushError ? `No se pudo subir: ${t.pushError}` : t.branch ? `${t.branch}${t.commit ? ` · ${t.commit}` : ''}` : '-'),
+    ])));
+    const providers = Object.entries(report.tokensByProvider).map(([p, n]) => `${p} ${fmt(n)}`).join(' · ');
+    body.push(el('div', 'note', `Tokens: ${providers || 'ninguno'}`));
+    report.limits.forEach((l) => body.push(el('div', 'note', `Límite de ${l.provider} a las ${hhmm(l.at)}; reintento a las ${hhmm(l.until)}.`)));
+    report.violations.forEach((v) => body.push(el('div', 'warnbox', `${agentTag(v.agent)} escribió fuera de su rama (${v.kind}): ${v.detail}`)));
+  } else {
+    body.push(el('div', 'note', 'Aún no ha habido ninguna noche.'));
+  }
+  $('n-report').replaceChildren(...body);
+}
+function table(head, rows) {
+  const t = el('table');
+  t.append(row(head, true), ...rows.map((r) => row(r)));
+  return t;
+}
+$('n-start').onclick = guarded(async () => {
+  const batch = [...ui.pick];
+  if (!batch.length) throw new Error('Marca al menos una tarea.');
+  const until = nextTime($('n-until').value);
+  const push = $('n-push').checked;
+  const ok = window.confirm(
+    `Se aprobarán ${batch.length} tareas y los agentes trabajarán sin ti hasta las ${hhmm(until.toISOString())}.\n\n`
+    + `${push ? 'Cada rama stackia/T-n se subirá a GitHub al pasar las comprobaciones. main no se toca.' : 'Nada se sube a GitHub.'}\n`
+    + 'No hay tope de tokens: siguen hasta que termine el lote, llegue la hora o el proveedor los pare.',
+  );
+  if (!ok) return;
+  await post('/api/night/start', { batch, until: until.toISOString(), push });
+  ui.pick.clear();
+  toast('Noche en marcha.');
+  await refresh();
+});
+$('n-drain').onclick = guarded(async () => {
+  await post('/api/night/drain');
+  toast('Terminará cuando acaben las tareas en curso.');
+  await refresh();
+});
+$('n-add').onclick = guarded(async () => {
+  const title = $('n-title').value.trim();
+  const instruction = $('n-instruction').value.trim();
+  if (!title || !instruction) throw new Error('Pon un título y una instrucción.');
+  await post('/api/task', { agent: $('n-agent').value, title, instruction });
+  $('n-title').value = '';
+  $('n-instruction').value = '';
+  await refresh();
 });
 
 /* settings */

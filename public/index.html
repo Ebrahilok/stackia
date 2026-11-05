@@ -48,6 +48,7 @@
         <button class="tab" data-v="ejec">Ejecuciones</button>
         <button class="tab" data-v="memoria">Memoria <span class="n" id="inbox-count" hidden></span></button>
         <button class="tab" data-v="cupos">Cupos</button>
+        <button class="tab" data-v="noche">Noche</button>
         <button class="tab" data-v="red">Red</button>
         <button class="tab" data-v="proyecto">Proyecto</button>
         <button class="tab" data-v="ajustes">Ajustes</button>
@@ -137,6 +138,27 @@
         <table id="usage"></table>
         <div class="row"><label>Ejecuciones simultáneas <select id="max-runs"></select></label></div>
         <div class="note">Son los tokens que informa cada CLI, incluida la caché. Los proveedores no dan el porcentaje de tu suscripción, así que no se muestra.</div>
+      </div>
+
+      <div class="view" id="v-noche">
+        <div class="okbox" id="n-status"></div>
+        <h3>Tareas pendientes de aprobar</h3>
+        <div id="n-list"></div>
+        <div class="row">
+          <label>Hasta las <input id="n-until" type="time" value="07:00"></label>
+          <label><input id="n-push" type="checkbox" checked> Subir cada rama a GitHub (nunca main)</label>
+        </div>
+        <div class="row">
+          <button class="btn pri" id="n-start">Empezar noche</button>
+          <button class="btn warn" id="n-drain">Terminar cuando acaben las actuales</button>
+        </div>
+        <div class="note">Solo trabajan en las tareas que marques. Paran al llegar la hora, si falla tres seguidas, si un agente escribe fuera de su rama o con PARAR TODO. Si un proveedor llega a su límite, esperan y siguen solos. El portátil no se suspende mientras dure.</div>
+        <h3>Añadir tarea</h3>
+        <div class="row"><select id="n-agent"></select><input id="n-title" type="text" class="wide" placeholder="Título corto"></div>
+        <textarea id="n-instruction" rows="4" placeholder="Instrucción completa: qué archivos tocar, qué no, cómo saber que está hecho."></textarea>
+        <div class="row"><button class="btn" id="n-add">Añadir como propuesta</button></div>
+        <h3>Informe</h3>
+        <div id="n-report"></div>
       </div>
 
       <div class="view" id="v-red">
