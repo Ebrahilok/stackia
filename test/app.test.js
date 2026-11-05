@@ -95,6 +95,13 @@ test('requires login, a valid host and the custom header', async () => {
   assert.equal(status, 403);
 });
 
+test('serves the office art', async () => {
+  const res = await fetch(`${base}/office.png`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.ok((await res.arrayBuffer()).byteLength > 1000);
+});
+
 test('first message carries the full package, the second resumes small', async () => {
   const id = await freeThread();
   const t1 = await say(id, 'hola');

@@ -18,6 +18,10 @@
   <header class="top">
     <div class="logo">STACK IA</div>
     <select id="project" aria-label="Proyecto"></select>
+    <div class="views" role="tablist">
+      <button data-view="office" class="on">Oficina</button>
+      <button data-view="chat">Chat</button>
+    </div>
     <div id="status" class="status"></div>
     <button id="stop" class="danger">PARAR TODO</button>
   </header>
@@ -25,7 +29,12 @@
   <main class="layout">
     <nav id="agents" class="agents" aria-label="Agentes"></nav>
 
-    <section class="chat">
+    <section id="view-office" class="office-view">
+      <div id="office" class="office"></div>
+      <p class="hint">Haz clic en un personaje para hablar con él. En su escritorio está trabajando; en la Sala Común está libre.</p>
+    </section>
+
+    <section id="view-chat" class="chat" hidden>
       <div class="chat-head">
         <label>Conversación <select id="thread"></select></label>
         <div class="meter"><span id="meter-label"></span><div class="bar"><i id="meter-fill"></i></div></div>

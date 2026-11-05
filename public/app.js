@@ -9,6 +9,18 @@ const LAYERS = {
   previous: 'Sesión anterior', cited: 'Tareas citadas', message: 'Tu mensaje', format: 'Formato de respuesta',
 };
 const POLL_MS = 2000;
+// Order matches tools/make_office_art.py. Positions are world pixels on the 480x272 map (feet of the character).
+const SPRITE_ROWS = ['arq', 'cod', 'qa', 'bib', 'mun', 'ui', 'owner'];
+const SPOTS = {
+  arq: { desk: [64, 70], lounge: [254, 190] },
+  cod: { desk: [220, 72], lounge: [318, 190] },
+  qa: { desk: [72, 176], lounge: [286, 190] },
+  bib: { desk: [392, 66], lounge: [220, 194] },
+  mun: { desk: [292, 62], lounge: [298, 164], onDemand: true },
+  ui: { desk: [304, 108], lounge: [336, 164], onDemand: true },
+};
+const OWNER_SPOT = [266, 156];
+const WAITING = ['proposed', 'review'];
 const ui = { project: null, agent: null, thread: null, state: null, formAgent: null, lastLog: '' };
 
 async function api(path, body) {
@@ -94,7 +106,70 @@ async function refresh() {
   drawInbox();
   drawForm(agent);
   drawStatus();
+  drawOffice();
   await drawThread();
+}
+
+function presence(agent) {
+  const { running, queued } = ui.state.runner;
+  const spot = SPOTS[agent.id] || SPOTS.arq;
+  const atDesk = (label, tone) => ({ at: spot.desk, label, tone });
+  if (running.some((j) => j.agent === agent.id)) return atDesk('⚙ trabajando', 'work');
+  if (queued.some((j) => j.agent === agent.id)) return atDesk('… en cola', 'work');
+  const tasks = ui.state.tasks.filter((t) => t.agent === agent.id);
+  if (tasks.some((t) => t.status === 'failed')) return atDesk('! error', 'bad');
+  if (tasks.some((t) => WAITING.includes(t.status))) return atDesk('? te espera', 'wait');
+  if (spot.onDemand) return { at: spot.lounge, label: 'zZ' };
+  return { at: spot.lounge, label: '♪', dance: true };
+}
+
+function placePerson(node, id, [x, y]) {
+  const row = Math.max(0, SPRITE_ROWS.indexOf(id));
+  node.style.left = `${(x / 480) * 100}%`;
+  node.style.top = `${(y / 272) * 100}%`;
+  node.style.backgroundPositionY = `${(row / (SPRITE_ROWS.length - 1)) * 100}%`;
+}
+
+function personNode(id) {
+  const box = $('office');
+  let node = box.querySelector(`[data-person="${id}"]`);
+  if (!node) {
+    node = el('button', 'person');
+    node.dataset.person = id;
+    node.append(el('span', 'tagline'));
+    box.append(node);
+  }
+  return node;
+}
+
+function drawOffice() {
+  const owner = personNode('owner');
+  owner.classList.add('static');
+  owner.disabled = true;
+  owner.firstChild.textContent = 'TÚ';
+  placePerson(owner, 'owner', OWNER_SPOT);
+  for (const agent of ui.state.agents) {
+    const state = presence(agent);
+    const node = personNode(agent.id);
+    placePerson(node, agent.id, state.at);
+    node.classList.toggle('dance', Boolean(state.dance));
+    node.classList.toggle('sel', agent.id === ui.agent);
+    node.setAttribute('aria-label', `${agent.name}: ${state.label}`);
+    node.firstChild.textContent = `${agent.tag} ${state.label}`;
+    node.firstChild.className = `tagline ${state.tone || ''}`;
+    node.onclick = guarded(async () => {
+      ui.agent = agent.id;
+      ui.thread = null;
+      showView('chat');
+      await refresh();
+    });
+  }
+}
+
+function showView(view) {
+  document.querySelectorAll('.views button').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+  $('view-office').hidden = view !== 'office';
+  $('view-chat').hidden = view !== 'chat';
 }
 
 function drawStatus() {
@@ -253,6 +328,9 @@ async function send() {
   await refresh();
 }
 
+document.querySelectorAll('.views button').forEach((b) => {
+  b.onclick = () => showView(b.dataset.view);
+});
 $('send').onclick = guarded(send);
 $('input').onkeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !$('send').disabled) {

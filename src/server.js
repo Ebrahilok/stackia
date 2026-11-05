@@ -14,7 +14,9 @@ const MAX_BODY = 256 * 1024;
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_MS = 60000;
 const PUBLIC = path.join(__dirname, '..', 'public');
-const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'],
+  '/office.png': ['office.png', 'image/png'], '/sprites.png': ['sprites.png', 'image/png'],
+};
 const sha = (text) => crypto.createHash('sha256').update(text).digest();
 
 class HttpError extends Error {
@@ -212,7 +214,7 @@ function createApp(config) {
 
     const asset = req.method === 'GET' && STATIC[url.pathname];
     if (asset) {
-      res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` });
+      res.writeHead(200, { 'Content-Type': asset[1] });
       return res.end(fs.readFileSync(path.join(PUBLIC, asset[0])));
     }
 
