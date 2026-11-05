@@ -148,7 +148,10 @@ class Autopilot {
 
     if (failures >= FAILURE_LIMIT) return this.finish(`${FAILURE_LIMIT} fallos seguidos`);
 
-    const inFlight = () => this.runner.running.size + this.runner.queue.length;
+    // Jobs held back by a provider limit are waiting, not working: they must not use up the slots
+    // that tasks for the other providers could be running in.
+    const waiting = (job) => this.runner.limitedUntil(this.office.agent(job.agent)?.provider) > 0;
+    const inFlight = () => this.runner.running.size + this.runner.queue.filter((job) => !waiting(job)).length;
     const draining = Date.now() >= new Date(state.until).getTime();
     if (!draining) {
       const generation = this.generation;
