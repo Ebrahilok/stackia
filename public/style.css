@@ -154,7 +154,7 @@ button{font-family:inherit}
 .stagewrap.panelopen .kanban{grid-template-columns:repeat(2,1fr)}
 .tray.open .kanban{max-height:46vh;overflow:auto}
 .kanban .card button{margin:5px 5px 0 0}
-.card .diff{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--mut);margin:4px 0 0}
+.card .diff{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:#f0e6d2;margin:4px 0 0}
 .tag.t0{background:#e0785a}.tag.t1{background:#46b4a0}.tag.t2{background:#d9a62e}.tag.t3{background:#8c78e6}.tag.t4{background:#4f8a3c}.tag.t5{background:#c0508c}
 .log{height:320px;overflow:auto;background:#fffcf2;border:2px solid #d4b988;border-radius:10px;padding:10px;margin:9px 0;display:flex;flex-direction:column;gap:8px}
 .msg{max-width:86%;padding:8px 11px;border-radius:10px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
