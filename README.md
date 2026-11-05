@@ -15,6 +15,11 @@ A self-hosted office for AI development agents. One machine hosts the agents; yo
 
 Set `host` to a private address only. Do not expose the port to the Internet.
 
+## Docs
+
+- `docs/DESIGN.md`: full design, including parts not built yet (in Spanish).
+- `mockups/`: office mockups and the scripts that generate them.
+
 ## Tests
 
 `npm test` runs everything against a fake CLI, so it spends no quota.
