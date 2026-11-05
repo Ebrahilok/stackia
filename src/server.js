@@ -25,7 +25,8 @@ class HttpError extends Error {
 }
 
 function loadConfig(file) {
-  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // Windows PowerShell writes a BOM, which JSON.parse rejects.
+  const config = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
   const base = path.dirname(path.resolve(file));
   config.dataDir = path.resolve(base, config.dataDir);
   for (const p of config.projects) {
