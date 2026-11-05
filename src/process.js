@@ -27,9 +27,12 @@ function run(cmd, args, { cwd, stdin, timeoutMs, onStart } = {}) {
   });
 }
 
-function killTree(child) {
+/** Kills a process and its children. onError hears about a kill that did not work. */
+function killTree(child, onError = () => {}) {
   if (process.platform === 'win32') {
-    execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => {});
+    execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], (err, stdout, stderr) => {
+      if (err) onError(`${err.message} ${stderr}`.trim().slice(0, 300));
+    });
   } else {
     child.kill('SIGKILL');
   }

@@ -21,12 +21,22 @@ async function call(method, url, body, headers = {}) {
   return { status: res.status, data: await res.json().catch(() => null), res };
 }
 
-async function until(check, ms = 15000) {
+async function until(check, ms = 15000, label = '') {
   const end = Date.now() + ms;
   for (;;) {
     const value = await check();
     if (value) return value;
-    if (Date.now() > end) throw new Error('Timed out waiting');
+    if (Date.now() > end) {
+      const { runner } = (await call('GET', '/api/state?project=demo')).data;
+      const tail = app.projects.get('demo').office.journal(12).map((e) => `${e.type}${e.error ? `(${e.error})` : ''}`).join(',');
+      let procs = '';
+      if (process.platform === 'win32') {
+        try {
+          procs = execFileSync('powershell', ['-NoProfile', '-Command', "(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'fake-cli' } | ForEach-Object { $_.ProcessId }) -join ','"], { encoding: 'utf8' }).trim();
+        } catch { procs = 'unknown'; }
+      }
+      throw new Error(`Timed out waiting ${label} :: running=${JSON.stringify(runner.running)} queued=${JSON.stringify(runner.queued)} journal=${tail} fakeCli=${procs}`);
+    }
     await new Promise((r) => setTimeout(r, 40));
   }
 }
@@ -60,6 +70,7 @@ before(async () => {
   git(repo, 'push', 'origin', 'main');
 
   process.env.STACKIA_TEST_FLAG = path.join(root, 'limit.flag');
+  process.env.STACKIA_TEST_REPO = repo;
   const brief = path.join(root, 'brief.md');
   fs.writeFileSync(brief, 'PROJECT BRIEF TEXT');
   app = createApp({
@@ -270,10 +281,17 @@ test('adapters read real output shapes', () => {
 const soon = () => new Date(Date.now() + 3600000).toISOString();
 const makeTask = async (instruction) => (await call('POST', '/api/task', { project: 'demo', agent: 'arq', title: instruction.slice(0, 30), instruction })).data.id;
 const night = (batch, extra = {}) => call('POST', '/api/night/start', { project: 'demo', batch, until: soon(), push: true, ...extra });
-const finishedNight = async () => until(async () => {
-  const { data } = await call('GET', '/api/night?project=demo');
-  return !data.night.active && data;
-}, 25000);
+const finishedNight = async () => {
+  const done = await until(async () => {
+    const { data } = await call('GET', '/api/night?project=demo');
+    return !data.night.active && data;
+  }, 25000, 'night to finish');
+  await until(async () => {
+    const { runner } = await stateNow();
+    return !runner.running.length && !runner.queued.length;
+  }, 25000, 'jobs to settle');
+  return done;
+};
 const taskOf = async (id) => (await stateNow()).tasks.find((t) => t.id === id);
 
 test('night: runs the approved batch, checks it and pushes only task branches', async () => {
@@ -326,14 +344,41 @@ test('night: a failing check is reported and nothing is pushed', async () => {
   }
 });
 
-test('night: writing outside the task folder stops the night and is reported', async () => {
-  const id = await makeTask('WRITEFILE ESCAPE');
+test('night: a task that writes outside its folder fails alone, and the others carry on', async () => {
+  const bad = await makeTask('WRITEFILE ESCAPE');
+  const good = await makeTask('WRITEFILE fine');
+  await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 1 });
+  try {
+    await night([bad, good]);
+    const done = await finishedNight();
+    assert.equal(done.night.stopReason, 'lote completado');
+    assert.equal((await taskOf(bad)).status, 'failed');
+    assert.match((await taskOf(bad)).error, /fuera de su rama/);
+    assert.equal((await taskOf(good)).status, 'pushed');
+    assert.ok(done.report.violations.length >= 1);
+    assert.ok(!git(bare, 'for-each-ref', '--format=%(refname)').includes(`stackia/${bad}`));
+  } finally {
+    await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 3 });
+    fs.rmSync(path.join(root, 'work', 'escaped.txt'), { force: true });
+  }
+});
+
+test('night: changing the owner copy stops everything', async () => {
+  const id = await makeTask('WRITEFILE TOUCHOWNER');
   await night([id]);
   const done = await finishedNight();
-  assert.match(done.night.stopReason, /fuera de su rama/);
-  assert.ok(done.report.violations.length >= 1);
-  assert.notEqual((await taskOf(id)).status, 'pushed', 'a task with a violation must not be pushed');
-  fs.rmSync(path.join(root, 'work', 'escaped.txt'), { force: true });
+  assert.match(done.night.stopReason, /tu copia de trabajo/);
+  fs.rmSync(path.join(repo, 'owner-touch.txt'), { force: true });
+});
+
+test('night: stopping while a task is still being prepared does not let it run', async () => {
+  const id = await makeTask('SLEEP while preparing');
+  assert.equal((await night([id])).status, 200);
+  await call('POST', '/api/stop', { project: 'demo' });
+  const done = await finishedNight();
+  assert.equal(done.night.stopReason, 'parada de emergencia');
+  const t = await thread('arq', id.toLowerCase());
+  assert.ok(!t || !t.busy, 'the job must not be left running');
 });
 
 test('night: emergency stop ends it, and bad requests are refused', async () => {
@@ -342,9 +387,9 @@ test('night: emergency stop ends it, and bad requests are refused', async () => 
   assert.equal((await night(['T-9999'])).status, 400);
   assert.equal((await night([id])).status, 200);
   assert.equal((await night([id])).status, 400, 'a second night cannot start');
-  await until(async () => (await stateNow()).runner.running.length === 1);
+  await until(async () => (await stateNow()).runner.running.some((j) => j.thread === id.toLowerCase()), 15000, 'night job to start');
   await call('POST', '/api/stop', { project: 'demo' });
   const done = await finishedNight();
   assert.equal(done.night.stopReason, 'parada de emergencia');
-  await until(async () => (await stateNow()).runner.running.length === 0);
+  await until(async () => (await stateNow()).runner.running.length === 0, 15000, 'killed job to exit');
 });

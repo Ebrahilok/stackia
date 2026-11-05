@@ -6,6 +6,7 @@ const gitOps = require('./git');
 const { run } = require('./process');
 const { startAwake } = require('./awake');
 const { now } = require('./office');
+const { OWNER_COPY } = require('./runner');
 
 const MAX_BATCH = 20;
 const MAX_HOURS = 16;
@@ -24,6 +25,7 @@ class Autopilot {
   constructor({ office, runner, project, approve, tickMs = 10000 }) {
     Object.assign(this, { office, runner, project, approve, tickMs });
     this.busy = false;
+    this.generation = 0;
     this.timer = null;
     this.release = null;
   }
@@ -89,6 +91,7 @@ class Autopilot {
   }
 
   finish(reason) {
+    this.generation += 1;
     clearInterval(this.timer);
     this.timer = null;
     this.release?.();
@@ -116,8 +119,10 @@ class Autopilot {
     if (!state.active) return;
     const task = (id) => this.office.task(id);
 
-    const violation = this.runner.violations[0];
-    if (violation) return this.finish(`un agente escribió fuera de su rama: ${violation.detail}`);
+    // Only a change to the owner's own working copy stops the whole night. A task that wrote
+    // outside its folder is already marked failed by the runner and the others carry on.
+    const intrusion = this.runner.violations.find((v) => v.kind === OWNER_COPY);
+    if (intrusion) return this.finish(`un agente cambió tu copia de trabajo: ${intrusion.detail}`);
 
     for (const id of state.batch) {
       if (task(id).status === 'review' && !state.checked.includes(id)) {
@@ -146,6 +151,7 @@ class Autopilot {
     const inFlight = () => this.runner.running.size + this.runner.queue.length;
     const draining = Date.now() >= new Date(state.until).getTime();
     if (!draining) {
+      const generation = this.generation;
       for (const id of state.batch) {
         if (inFlight() >= this.runner.maxConcurrent) break;
         if (task(id).status !== 'proposed') continue;
@@ -154,6 +160,8 @@ class Autopilot {
         } catch (err) {
           this.office.updateTask(id, { status: 'failed', error: err.message });
         }
+        // The night may have been stopped while this task was being prepared; do not let it run on.
+        if (generation !== this.generation) return this.cancel(id);
       }
     }
 
@@ -163,6 +171,12 @@ class Autopilot {
     };
     if (state.batch.every(finished)) return this.finish('lote completado');
     if (draining && !inFlight()) this.finish('hora límite');
+  }
+
+  cancel(taskId) {
+    const thread = taskId.toLowerCase();
+    const jobs = [...[...this.runner.running.values()].map((e) => e.job), ...this.runner.queue].filter((j) => j.thread === thread);
+    jobs.forEach((job) => this.runner.stop(job.id));
   }
 
   async verify(task, state) {

@@ -13,6 +13,8 @@ const AUTO_CLEAN_RATIO = 0.6;
 const DEFAULT_LIMIT_BACKOFF_MS = 30 * 60000;
 const LIMIT_ERROR = /rate.?limit|usage limit|limit reached|quota|too many requests|resource.?exhausted|\b429\b|overloaded|try again (in|later)/i;
 const TASK_DIR = /^T-\d+$/;
+const OUTSIDE = 'carpeta fuera de su rama';
+const OWNER_COPY = 'tu copia de trabajo cambió';
 const normalize = (file) => file.replace(/\\/g, '/').replace(/^\.\//, '');
 
 /** Queues agent runs, keeps context alive across sessions, and records everything. */
@@ -120,10 +122,10 @@ class Runner {
     const after = await this.snapshot();
     const found = [];
     for (const name of after.entries) {
-      if (!before.entries.has(name) && !TASK_DIR.test(name)) found.push({ kind: 'carpeta fuera de su rama', detail: name });
+      if (!before.entries.has(name) && !TASK_DIR.test(name)) found.push({ kind: OUTSIDE, detail: name });
     }
     for (const line of after.status) {
-      if (!before.status.has(line)) found.push({ kind: 'tu copia de trabajo cambió', detail: line.trim() });
+      if (!before.status.has(line)) found.push({ kind: OWNER_COPY, detail: line.trim() });
     }
     for (const item of found) {
       const record = { at: now(), job: job.id, agent: job.agent, ...item };
@@ -159,6 +161,7 @@ class Runner {
     office.store.writeText(`runs/${job.id}.prompt.txt`, pack.prompt);
     const { cmd, args, stdin } = adapter.command(request, this.cli);
     const before = await this.snapshot();
+    if (entry.stopped) return this.recordFailure(job, 'Stopped by the owner.');
     const started = Date.now();
     const result = await run(cmd, args, {
       cwd: request.cwd,
@@ -206,8 +209,12 @@ class Runner {
       resumed: pack.resumed, usage: parsed.usage, seconds, next_action: handoff?.next_action,
     });
     if (task) {
+      // Writing outside the task's own folder disqualifies the task: it is never checked or published.
+      const outside = violations.filter((v) => v.kind === OUTSIDE);
       office.updateTask(task.id, {
-        status: 'review', handoff: handoff || task.handoff || null, changed, diff: await gitOps.diffStat(task.worktree),
+        status: outside.length ? 'failed' : 'review',
+        error: outside.length ? `Escribió fuera de su rama: ${outside.map((v) => v.detail).join(', ')}` : undefined,
+        handoff: handoff || task.handoff || null, changed, diff: await gitOps.diffStat(task.worktree),
       });
     }
     const limit = (agent.contextLimit || 60000) * AUTO_CLEAN_RATIO;
@@ -246,15 +253,21 @@ class Runner {
     const entry = this.running.get(jobId);
     if (!entry) return false;
     entry.stopped = true;
-    if (entry.child) killTree(entry.child);
+    if (entry.child) this.kill(entry);
     return true;
+  }
+
+  kill(entry) {
+    const pid = entry.child.pid;
+    this.office.log('kill', { job: entry.job.id, pid });
+    killTree(entry.child, (error) => this.office.log('kill_failed', { job: entry.job.id, pid, error }));
   }
 
   stopAll() {
     this.queue.splice(0).forEach((job) => this.recordFailure(job, 'Stopped by the owner.'));
     for (const entry of this.running.values()) {
       entry.stopped = true;
-      if (entry.child) killTree(entry.child);
+      if (entry.child) this.kill(entry);
     }
     this.office.log('emergency_stop');
   }
@@ -270,4 +283,4 @@ class Runner {
 
 const summary = (job) => ({ id: job.id, agent: job.agent, thread: job.thread });
 
-module.exports = { Runner };
+module.exports = { Runner, OWNER_COPY };

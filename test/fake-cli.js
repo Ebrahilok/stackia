@@ -13,6 +13,7 @@ if (has('LIMITONCE') && process.env.STACKIA_TEST_FLAG && !fs.existsSync(process.
   process.exit(0);
 }
 if (has('ESCAPE')) fs.writeFileSync('../escaped.txt', 'x');
+if (has('TOUCHOWNER') && process.env.STACKIA_TEST_REPO) fs.writeFileSync(`${process.env.STACKIA_TEST_REPO}/owner-touch.txt`, 'x');
 if (has('CRASH')) {
   console.error('boom');
   process.exit(3);
