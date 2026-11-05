@@ -1,0 +1,21 @@
+{
+  "host": "127.0.0.1",
+  "port": 7777,
+  "allowedHosts": [],
+  "dataDir": "../stackia-data",
+  "maxConcurrent": 2,
+  "jobTimeoutMinutes": 20,
+  "cli": { "claude": "claude", "codex": "codex", "agy": "agy" },
+  "projects": [
+    {
+      "id": "demo",
+      "name": "Demo",
+      "repo": "/path/to/git/repo",
+      "base": "main",
+      "remote": "origin",
+      "worktrees": "../stackia-work/demo",
+      "template": "roblox-rojo",
+      "brief": null
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+node_modules/
+stackia.config.json
+data/
+*.log

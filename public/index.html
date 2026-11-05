@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Stack IA</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<form id="login" class="login" hidden>
+  <h1>STACK IA</h1>
+  <label>Clave del dueño <input id="token" type="password" autocomplete="current-password" required></label>
+  <button class="primary">Entrar</button>
+  <p id="login-error" class="error"></p>
+</form>
+
+<div id="app" class="app" hidden>
+  <header class="top">
+    <div class="logo">STACK IA</div>
+    <select id="project" aria-label="Proyecto"></select>
+    <div id="status" class="status"></div>
+    <button id="stop" class="danger">PARAR TODO</button>
+  </header>
+
+  <main class="layout">
+    <nav id="agents" class="agents" aria-label="Agentes"></nav>
+
+    <section class="chat">
+      <div class="chat-head">
+        <label>Conversación <select id="thread"></select></label>
+        <div class="meter"><span id="meter-label"></span><div class="bar"><i id="meter-fill"></i></div></div>
+        <button id="clean" title="Termina la sesión; el handoff se conserva">Limpiar contexto</button>
+      </div>
+      <div id="log" class="log" aria-live="polite"></div>
+      <div class="composer">
+        <textarea id="input" rows="3" placeholder="Escribe al agente. Usa #T-1 para citar una tarea. Enter envía, Mayús+Enter salta de línea."></textarea>
+        <button id="send" class="primary">Enviar</button>
+      </div>
+      <div class="actions">
+        <button id="to-task">Convertir en tarea</button>
+        <button id="to-note">Guardar como nota</button>
+        <button id="to-memory">Proponer a memoria</button>
+        <span class="hint">Usan el texto del cuadro. Hablar no cambia el prompt del agente.</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="tabs" role="tablist">
+        <button data-tab="tasks" class="on">Tareas</button>
+        <button data-tab="inbox">Bandeja <span id="inbox-count" class="count"></span></button>
+        <button data-tab="agent">Agente</button>
+        <button data-tab="context">Contexto</button>
+      </div>
+      <div id="tab-tasks" class="tab on"></div>
+      <div id="tab-inbox" class="tab"></div>
+      <div id="tab-agent" class="tab">
+        <label>Proveedor <select id="f-provider"></select></label>
+        <label>Modelo <select id="f-model"></select></label>
+        <label>Esfuerzo <select id="f-effort"></select></label>
+        <label>Prompt del agente <textarea id="f-charter" rows="9"></textarea></label>
+        <label>Memoria <textarea id="f-memory" rows="6"></textarea></label>
+        <button id="f-save" class="primary">Guardar agente</button>
+        <p id="f-result" class="hint"></p>
+      </div>
+      <div id="tab-context" class="tab">
+        <p class="hint">Lo que recibiría el agente con el texto actual. Es una estimación antes de ejecutar.</p>
+        <button id="preview">Actualizar</button>
+        <div id="layers"></div>
+      </div>
+    </aside>
+  </main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
