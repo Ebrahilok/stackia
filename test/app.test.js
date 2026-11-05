@@ -243,6 +243,8 @@ test('one job can be stopped alone, and settings and agent fields apply', async 
   const qa = (await stateNow()).agents.find((a) => a.id === 'qa');
   assert.deepEqual([qa.contextLimit, qa.canWrite, qa.commands], [20000, true, ['rojo build']]);
   assert.equal((await call('POST', '/api/agent', { ...base2, commands: ['rm -rf /; x'] })).status, 400);
+  assert.equal((await call('POST', '/api/agent', { ...base2, commands: ['a && b'] })).status, 400);
+  assert.equal((await call('POST', '/api/agent', { ...base2, commands: ['node C:/tools/verify.js'] })).status, 200);
   assert.equal((await call('POST', '/api/agent', { ...base2, mcp: ['unknown'] })).status, 400);
 
   assert.equal((await call('POST', '/api/brief', { project: 'demo', text: 'NEW BRIEF' })).status, 200);

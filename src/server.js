@@ -18,7 +18,8 @@ const PUBLIC = path.join(__dirname, '..', 'public');
 const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'],
   '/office.png': ['office.png', 'image/png'], '/sprites.png': ['sprites.png', 'image/png'],
 };
-const COMMAND = /^[a-z0-9][a-z0-9 ._-]{0,60}$/;
+// Letters, digits, spaces and path characters only: nothing a shell could act on.
+const COMMAND = /^[A-Za-z0-9][A-Za-z0-9 ._:/-]{0,120}$/;
 const sha = (text) => crypto.createHash('sha256').update(text).digest();
 
 class HttpError extends Error {
