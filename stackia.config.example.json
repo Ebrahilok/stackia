@@ -16,7 +16,8 @@
       "worktrees": "../stackia-work/demo",
       "template": "roblox-rojo",
       "brief": null,
-      "checks": []
+      "checks": [],
+      "luauAnalyze": ""
     }
   ]
 }

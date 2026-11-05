@@ -13,7 +13,7 @@ const MAX_HOURS = 16;
 const FAILURE_LIMIT = 3;
 const CHECK_TIMEOUT_MS = 5 * 60000;
 const FAILED = ['failed', 'check_failed', 'empty'];
-const DONE = [...FAILED, 'pushed', 'rejected'];
+const DONE = [...FAILED, 'pushed', 'rejected', 'done'];
 
 const splitCommand = (line) => line.trim().split(/\s+/);
 
@@ -184,6 +184,11 @@ class Autopilot {
 
   async verify(task, state) {
     const { office } = this;
+    // A read-only agent (a reviewer, say) is not expected to change files: its answer is the result.
+    if (!office.agent(task.agent)?.canWrite) {
+      office.updateTask(task.id, { status: 'done', verified: true });
+      return;
+    }
     const files = await gitOps.changedFiles(task.worktree);
     if (!files.length) {
       office.updateTask(task.id, { status: 'empty', error: 'El agente no cambió ningún archivo.' });
@@ -210,11 +215,13 @@ class Autopilot {
   /** Returns a description of the first failing check, or null when everything passes. */
   async checks(task) {
     const out = path.join(os.tmpdir(), `stackia-${task.id}.rbxl`);
+    const syntax = await this.syntaxProblem(task);
+    if (syntax) return syntax;
     const steps = [
       ['git', ['add', '-A', '--intent-to-add']],
       ['git', ['diff', '--check']],
       ...(this.project.checks || []).map((line) => {
-        const [cmd, ...args] = splitCommand(line).map((part) => part.replace('{tmp}', out));
+        const [cmd, ...args] = (Array.isArray(line) ? line : splitCommand(line)).map((part) => part.replace('{tmp}', out));
         return [cmd, args];
       }),
     ];
@@ -230,6 +237,22 @@ class Autopilot {
     } finally {
       fs.rmSync(out, { force: true });
     }
+  }
+
+  /**
+   * A project build only packs files; it does not read the code. When the project names a Luau analyzer,
+   * every changed Luau file is parsed, and any syntax error fails the task.
+   */
+  async syntaxProblem(task) {
+    if (!this.project.luauAnalyze) return null;
+    const files = (await gitOps.changedFiles(task.worktree)).filter((f) => /\.luau?$/.test(f) && fs.existsSync(path.join(task.worktree, f)));
+    if (!files.length) return null;
+    const analyzer = this.project.luauAnalyze;
+    const [cmd, ...args] = Array.isArray(analyzer) ? analyzer : splitCommand(analyzer);
+    const result = await run(cmd, [...args, ...files], { cwd: task.worktree, timeoutMs: CHECK_TIMEOUT_MS });
+    if (result.spawnError) return `analizador de Luau: ${result.spawnError}`;
+    const errors = `${result.stdout}\n${result.stderr}`.split('\n').filter((line) => line.includes('SyntaxError'));
+    return errors.length ? `error de sintaxis: ${errors.slice(0, 3).join(' | ').slice(0, 400)}` : null;
   }
 
   report() {
@@ -250,6 +273,7 @@ class Autopilot {
         return {
           id, title: t.title, agent: t.agent, status: t.status, branch: t.branch, commit: t.commit, error: t.error, pushError: t.pushError,
           files: t.pushedFiles || t.changed || [], next: t.handoff?.next_action, pending: t.handoff?.pending || [],
+          result: this.office.thread(t.agent, id.toLowerCase())?.messages.filter((m) => m.role === 'agent').at(-1)?.text.slice(0, 2500) || '',
           tokens: tokens((e) => e.task === id),
         };
       }),
@@ -262,7 +286,7 @@ class Autopilot {
 
 const STATUS_TEXT = {
   pushed: 'subida', failed: 'falló', check_failed: 'no pasó las comprobaciones', empty: 'sin cambios', review: 'lista', proposed: 'no empezó',
-  approved: 'en espera', running: 'en curso', rejected: 'rechazada',
+  approved: 'en espera', running: 'en curso', rejected: 'rechazada', done: 'revisada',
 };
 
 function markdown(report) {
@@ -273,6 +297,7 @@ function markdown(report) {
     if (t.error) lines.push(`  - Problema: ${t.error}`);
     if (t.pushError) lines.push(`  - No se pudo subir: ${t.pushError}`);
     if (t.next) lines.push(`  - Siguiente paso: ${t.next}`);
+    if (t.result) lines.push('', ...t.result.split('\n').map((l) => `    > ${l}`), '');
   }
   lines.push('', '## Tokens por proveedor', ...Object.entries(report.tokensByProvider).map(([p, n]) => `- ${p}: ${n}`));
   if (report.limits.length) lines.push('', '## Límites de uso', ...report.limits.map((l) => `- ${l.provider} a las ${l.at}, reintento ${l.until}`));

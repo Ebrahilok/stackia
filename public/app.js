@@ -5,7 +5,7 @@ const STATUS_COLUMNS = [
   ['PROPUESTAS (tú apruebas)', ['proposed']],
   ['EN CURSO', ['approved', 'running']],
   ['REVISIÓN', ['review', 'failed', 'check_failed', 'empty']],
-  ['SUBIDAS', ['pushed']],
+  ['SUBIDAS / REVISADAS', ['pushed', 'done']],
 ];
 const LAYERS = {
   charter: 'prompt', project: 'proyecto', memory: 'memoria', notes: 'notas', task: 'tarea',
@@ -13,7 +13,7 @@ const LAYERS = {
 };
 const TASK_STATUS = {
   proposed: 'pendiente', approved: 'en espera', running: 'en curso', review: 'lista', pushed: 'subida', failed: 'falló',
-  check_failed: 'no pasó las comprobaciones', empty: 'sin cambios', rejected: 'rechazada',
+  check_failed: 'no pasó las comprobaciones', empty: 'sin cambios', rejected: 'rechazada', done: 'revisada',
 };
 const POLL_MS = 2000;
 const AUTO_CLEAN_RATIO = 0.6;
@@ -27,7 +27,7 @@ const ROOMS = {
   D: [28, 124, 172, 234, 'QA', '#e3a92c'], E: [176, 124, 360, 234, 'SALA COMÚN', '#d46f55', 212], F: [364, 124, 452, 234, 'RED · INVITADOS', '#5a96d2'],
 };
 // Order matches tools/make_office_art.py. Positions are the character's feet on the 480x272 map.
-const SPRITE_ROWS = ['arq', 'cod', 'qa', 'bib', 'mun', 'ui', 'owner'];
+const SPRITE_ROWS = ['arq', 'cod', 'qa', 'bib', 'mun', 'ui', 'rev', 'owner'];
 const SPOTS = {
   arq: { desk: [64, 70], lounge: [254, 190], room: 'A' },
   cod: { desk: [220, 72], lounge: [318, 190], room: 'B' },
@@ -35,6 +35,7 @@ const SPOTS = {
   bib: { desk: [392, 66], lounge: [220, 194], room: 'C' },
   mun: { desk: [292, 62], lounge: [298, 164], room: 'B', onDemand: true },
   ui: { desk: [304, 108], lounge: [336, 164], room: 'B', onDemand: true },
+  rev: { desk: [352, 100], lounge: [352, 200], room: 'C' },
 };
 const WAITING = ['proposed', 'review'];
 const OWNER_STEP = 3;

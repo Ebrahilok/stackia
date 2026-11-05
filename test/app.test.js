@@ -344,6 +344,24 @@ test('night: a failing check is reported and nothing is pushed', async () => {
   }
 });
 
+test('night: a Luau syntax error is caught even when the build passes', async () => {
+  const project = app.projects.get('demo').project;
+  project.luauAnalyze = [process.execPath, path.join(__dirname, 'fake-analyzer.js')];
+  try {
+    const bad = await makeTask('BADSYNTAX please');
+    const good = await makeTask('GOODLUAU please');
+    await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 1 });
+    await night([bad, good]);
+    await finishedNight();
+    assert.equal((await taskOf(bad)).status, 'check_failed');
+    assert.match((await taskOf(bad)).error, /sintaxis/);
+    assert.equal((await taskOf(good)).status, 'pushed');
+  } finally {
+    project.luauAnalyze = '';
+    await call('POST', '/api/settings', { project: 'demo', maxConcurrent: 3 });
+  }
+});
+
 test('night: a task that writes outside its folder fails alone, and the others carry on', async () => {
   const bad = await makeTask('WRITEFILE ESCAPE');
   const good = await makeTask('WRITEFILE fine');

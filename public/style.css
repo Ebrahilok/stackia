@@ -139,7 +139,7 @@ button{font-family:inherit}
 #stage{background:#8fc95c}
 .who{position:absolute;width:0;height:0;transition:left 1.8s linear,top 1.8s linear}
 .who.me{transition:left .12s linear,top .12s linear}
-.sprite{position:absolute;left:-30px;top:-110px;width:60px;height:120px;background:url(/sprites.png) 0 0/120px 840px no-repeat;image-rendering:pixelated;padding:0;border-radius:12px}
+.sprite{position:absolute;left:-30px;top:-110px;width:60px;height:120px;background:url(/sprites.png) 0 0/120px 960px no-repeat;image-rendering:pixelated;padding:0;border-radius:12px}
 .who.dance .sprite{animation:dance .5s steps(1) infinite}
 @keyframes dance{0%{background-position-x:0}50%{background-position-x:-60px}}
 .who .bub{left:0;top:-122px}

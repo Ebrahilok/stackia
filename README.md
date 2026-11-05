@@ -38,7 +38,7 @@ In the control panel, open **Noche**, tick the tasks you approve, set an end tim
 - It stops at the end time, after three failures in a row, if an agent writes outside its branch, or on the emergency stop.
 - The machine is kept awake while it runs, and a report is written to `<dataDir>/projects/<id>/reports/`.
 
-Project `checks` are commands run in the task's worktree; `{tmp}` becomes a temporary file path.
+Project `checks` are commands run in the task's worktree; `{tmp}` becomes a temporary file path. `luauAnalyze` (optional) is the command of a Luau analyzer, as a string or as a list when a path has spaces: every changed Luau file is parsed and a syntax error fails the task, because a project build only packs files and does not read the code.
 
 ## Tests
 

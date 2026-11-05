@@ -20,6 +20,8 @@ if (has('CRASH')) {
 }
 if (has('SLEEP')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
 if (has('WRITEFILE')) fs.writeFileSync('agent-output.txt', 'hello\n');
+if (has('BADSYNTAX')) fs.writeFileSync('broken.luau', 'local x = BROKEN\n');
+if (has('GOODLUAU')) fs.writeFileSync('fine.luau', 'local x = 1\n');
 
 const handoff = {
   done: ['replied'], decisions: [], pending: [], next_action: 'next step from fake',
